@@ -32,7 +32,13 @@ struct Scope {
 /// 结构体定义信息
 #[derive(Debug, Clone)]
 struct StructDef {
-    fields: Vec<String>,  // 字段名列表（按顺序）
+    fields: Vec<StructFieldInfo>,  // 字段信息列表（按顺序）
+}
+
+#[derive(Debug, Clone)]
+struct StructFieldInfo {
+    name: String,
+    field_type: Type,
 }
 
 /// 局部变量的类型信息
@@ -91,9 +97,14 @@ impl Compiler {
             }
 
             Stmt::StructDeclaration { name, fields } => {
-                // 注册结构体定义
-                let field_names: Vec<String> = fields.iter().map(|f| f.name.clone()).collect();
-                self.structs.insert(name, StructDef { fields: field_names });
+                // 注册结构体定义（包含完整的字段类型信息）
+                let field_infos: Vec<StructFieldInfo> = fields.iter().map(|f| {
+                    StructFieldInfo {
+                        name: f.name.clone(),
+                        field_type: f.field_type.clone(),
+                    }
+                }).collect();
+                self.structs.insert(name, StructDef { fields: field_infos });
                 // 结构体声明在运行时不需要操作
             }
 
@@ -341,11 +352,11 @@ impl Compiler {
                 for defined_field in &struct_def.fields {
                     // 查找用户提供的对应字段
                     let field_value = fields.iter()
-                        .find(|(name, _)| name == defined_field)
+                        .find(|(name, _)| name == &defined_field.name)
                         .map(|(_, value)| value)
                         .ok_or_else(|| CompileError::UndefinedField(
                             struct_name.clone(),
-                            defined_field.clone()
+                            defined_field.name.clone()
                         ))?;
 
                     self.compile_expression(field_value.clone())?;
@@ -632,9 +643,16 @@ impl Compiler {
 
         function_compiler.begin_scope();
 
-        // 添加参数为局部变量
+        // 添加参数为局部变量，并记录类型信息
         for param in parameters {
             function_compiler.add_local(param.name.clone(), false)?;
+            // 记录参数的类型信息
+            if let Some(param_type) = &param.type_annotation {
+                function_compiler.local_types.push(LocalTypeInfo {
+                    name: param.name.clone(),
+                    var_type: param_type.clone(),
+                });
+            }
         }
 
         // 编译函数体
@@ -763,11 +781,11 @@ impl Compiler {
             Expr::StructLiteral { struct_name, .. } => {
                 // 从结构体定义查找类型
                 if let Some(struct_def) = self.structs.get(struct_name) {
-                    // 构建完整的 StructType
-                    let fields = struct_def.fields.iter().map(|name| {
+                    // 构建完整的 StructType（包含字段类型）
+                    let fields = struct_def.fields.iter().map(|field_info| {
                         crate::ast::StructField {
-                            name: name.clone(),
-                            field_type: Type::Unknown, // 简化处理
+                            name: field_info.name.clone(),
+                            field_type: field_info.field_type.clone(),
                         }
                     }).collect();
                     Type::Struct(StructType {
@@ -818,10 +836,10 @@ impl Compiler {
             Type::Named(name) => {
                 // 查找结构体定义
                 if let Some(struct_def) = self.structs.get(name) {
-                    let fields = struct_def.fields.iter().map(|field_name| {
+                    let fields = struct_def.fields.iter().map(|field_info| {
                         crate::ast::StructField {
-                            name: field_name.clone(),
-                            field_type: Type::Unknown, // 简化处理
+                            name: field_info.name.clone(),
+                            field_type: field_info.field_type.clone(),
                         }
                     }).collect();
                     Type::Struct(StructType {
