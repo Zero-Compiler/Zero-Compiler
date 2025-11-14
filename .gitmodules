@@ -1,3 +1,6 @@
 [submodule "error-msg"]
 	path = error-msg
 	url = https://github.com/Zero-Compiler/Zero-Lang-Error-Msg.git
+[submodule "lang-spec"]
+	path = lang-spec
+	url = https://github.com/Zero-Compiler/Zero-Lang-Spec
