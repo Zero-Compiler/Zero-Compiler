@@ -150,14 +150,13 @@ Zero-compiler/
 │   │   └── mod.rs           # 基于栈的VM实现
 │   └── interpreter/         # 解释器（保留用于对比）
 │       └── mod.rs           # 树遍历解释器
-├── examples/                # 示例程序
-│   ├── hello.zero           # Hello World
-│   ├── variables.zero       # 变量示例
-│   ├── functions.zero       # 函数示例
-│   ├── control_flow.zero    # 控制流示例
-│   ├── types.zero           # 类型系统示例
-│   ├── arrays.zero          # 数组示例
-│   └── array_test.zero      # 数组测试
+├── lang-spec/               # Zero语言规范 (子模块)
+│   ├── examples/            # 示例程序
+│   │   ├── hello.zero       # Hello World
+│   │   ├── variables.zero   # 变量示例
+│   │   ├── functions.zero   # 函数示例
+│   │   └── ...              # 更多示例
+│   └── spec/                # 语言规范文档
 ├── docs/                    # 文档
 │   ├── ARCHITECTURE.md      # 架构文档
 │   ├── LANGUAGE_SPEC.md     # 语言规范
@@ -187,11 +186,11 @@ cargo build --release
 
 ```bash
 # 运行示例程序（使用字节码VM）
-cargo run examples/hello.zero
-cargo run examples/functions.zero
-cargo run examples/control_flow.zero
-cargo run examples/arrays.zero
-cargo run examples/types.zero
+cargo run lang-spec/examples/hello.zero
+cargo run lang-spec/examples/functions.zero
+cargo run lang-spec/examples/control_flow.zero
+cargo run lang-spec/examples/arrays.zero
+cargo run lang-spec/examples/types.zero
 
 # 运行自定义程序
 cargo run -- <source_file.zero>
@@ -212,10 +211,10 @@ cargo run -- --old <source_file.zero>
 
 ```bash
 # 设置环境变量启用字节码反汇编
-ZERO_DEBUG=1 cargo run examples/functions.zero
+ZERO_DEBUG=1 cargo run lang-spec/examples/functions.zero
 
 # 在debug构建中自动显示栈状态
-cargo run --debug examples/functions.zero
+cargo run --debug lang-spec/examples/functions.zero
 ```
 
 ### 运行测试
@@ -243,19 +242,19 @@ cargo test -- --nocapture
 
 项目包含以下示例程序：
 
-1. **[hello.zero](examples/hello.zero)** - 基本的Hello World程序
-2. **[variables.zero](examples/variables.zero)** - 变量声明和使用
-3. **[functions.zero](examples/functions.zero)** - 函数定义和调用
-4. **[control_flow.zero](examples/control_flow.zero)** - 控制流结构（if/while/for）
-5. **[types.zero](examples/types.zero)** - 类型系统和类型注解
-6. **[arrays.zero](examples/arrays.zero)** - 数组操作和索引访问
-7. **[array_test.zero](examples/array_test.zero)** - 数组功能完整测试
+1. **[hello.zero](lang-spec/examples/hello.zero)** - 基本的Hello World程序
+2. **[variables.zero](lang-spec/examples/variables.zero)** - 变量声明和使用
+3. **[functions.zero](lang-spec/examples/functions.zero)** - 函数定义和调用
+4. **[control_flow.zero](lang-spec/examples/control_flow.zero)** - 控制流结构（if/while/for）
+5. **[types.zero](lang-spec/examples/types.zero)** - 类型系统和类型注解
+6. **[arrays.zero](lang-spec/examples/arrays.zero)** - 数组操作和索引访问
+7. **[array_test.zero](lang-spec/examples/array_test.zero)** - 数组功能完整测试
 
 运行示例：
 
 ```bash
 # 运行所有示例
-for example in examples/*.zero; do
+for example in lang-spec/examples/*.zero; do
     echo "=== Running $example ==="
     cargo run --quiet "$example"
     echo

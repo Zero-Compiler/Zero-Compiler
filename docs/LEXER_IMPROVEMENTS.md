@@ -157,12 +157,12 @@ pub enum LexerError {
 
 **单文件分析**:
 ```bash
-cargo run --bin lexer-cli tokenize examples/hello.zero
+cargo run --bin lexer-cli tokenize lang-spec/examples/hello.zero
 ```
 
 **批量处理**:
 ```bash
-cargo run --bin lexer-cli batch 'examples/*.zero' output/tokens
+cargo run --bin lexer-cli batch 'lang-spec/examples/*.zero' output/tokens
 ```
 
 **输出格式**:

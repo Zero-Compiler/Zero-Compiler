@@ -48,8 +48,8 @@ fn print_usage(program: &str) {
     println!("  {} batch <pattern> <out_dir>   - Batch process and save tokens", program);
     println!();
     println!("Examples:");
-    println!("  {} tokenize examples/hello.zero", program);
-    println!("  {} tokenize 'examples/*.zero'", program);
+    println!("  {} tokenize lang-spec/examples/hello.zero", program);
+    println!("  {} tokenize 'lang-spec/examples/*.zero'", program);
     println!("  {} batch 'src/**/*.zero' output/tokens", program);
 }
 

@@ -49,20 +49,20 @@ error[L001]: 未闭合的字符串字面量
 
 ```bash
 # 简易模式（默认）
-cargo run --bin Zero-compiler examples/error_test.zero
+cargo run --bin Zero-compiler lang-spec/examples/error_test.zero
 
 # 详细模式
-cargo run --bin Zero-compiler examples/error_test.zero --dtl
+cargo run --bin Zero-compiler lang-spec/examples/error_test.zero --dtl
 
 # 编译模式
-cargo run --bin Zero-compiler -- --compile examples/error_test.zero output.zbc --dtl
+cargo run --bin Zero-compiler -- --compile lang-spec/examples/error_test.zero output.zbc --dtl
 
 # 旧解释器模式
-cargo run --bin Zero-compiler -- --old examples/error_test.zero --dtl
+cargo run --bin Zero-compiler -- --old lang-spec/examples/error_test.zero --dtl
 
 # 或者先编译后运行
 cargo build --release
-./target/release/Zero-compiler examples/error_test.zero --dtl
+./target/release/Zero-compiler lang-spec/examples/error_test.zero --dtl
 ```
 
 ## 错误类型
@@ -240,15 +240,15 @@ error[{错误代码}]: {标题}
 
 ```bash
 # 简易模式
-cargo run --bin Zero-compiler examples/error_test.zero
+cargo run --bin Zero-compiler lang-spec/examples/error_test.zero
 
 # 详细模式
-cargo run --bin Zero-compiler examples/error_test.zero --dtl
+cargo run --bin Zero-compiler lang-spec/examples/error_test.zero --dtl
 ```
 
 ### 测试示例
 
-查看 `examples/error_test.zero` 文件以了解各种错误类型的示例。
+查看 `lang-spec/examples/error_test.zero` 文件以了解各种错误类型的示例。
 
 ## 扩展
 

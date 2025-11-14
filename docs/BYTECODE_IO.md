@@ -14,7 +14,7 @@ cargo run -- --compile <source_file.zero> <output.zbc>
 
 示例：
 ```bash
-cargo run -- --compile examples/array_test.zero output.zbc
+cargo run -- --compile lang-spec/examples/array_test.zero output.zbc
 ```
 
 ### 2. 运行字节码文件

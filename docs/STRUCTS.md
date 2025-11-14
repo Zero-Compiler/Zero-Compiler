@@ -237,7 +237,7 @@ pub enum Value {
 
 ## 使用示例
 
-参见 [`examples/structs.zero`](../examples/structs.zero) 获取完整的使用示例。
+参见 [`lang-spec/examples/structs.zero`](../lang-spec/examples/structs.zero) 获取完整的使用示例。
 
 ```rust
 // 定义结构体

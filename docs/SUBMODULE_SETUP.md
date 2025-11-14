@@ -149,7 +149,7 @@ vim locale/zh_CN/error_messages.toml
 # 在 Zero-compiler 中测试
 cd ..
 cargo test
-cargo run --bin Zero-compiler examples/error_test.zero --dtl
+cargo run --bin Zero-compiler lang-spec/examples/error_test.zero --dtl
 
 # 注意：不要提交这些本地修改到 error-msg
 cd error-msg
