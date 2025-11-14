@@ -6,6 +6,7 @@ mod compiler;
 mod vm;
 mod type_checker;
 mod error;
+mod module_loader;
 
 // 保留旧的解释器用于对比
 mod interpreter;
@@ -17,11 +18,14 @@ use vm::VM;
 use type_checker::TypeChecker;
 use bytecode::serializer::{BytecodeSerializer, BytecodeDeserializer};
 use error::{ErrorMode, ErrorDisplayer};
+use module_loader::ModuleLoader;
+use ast::{Program, Stmt};
 use std::env;
 use std::fs;
 use std::fs::File;
 use std::io::{BufReader, BufWriter};
 use std::process;
+use std::path::PathBuf;
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -70,9 +74,10 @@ fn main() {
             run_bytecode_file(&args[2]);
         }
         _ => {
-            let source = read_source_file(&args[1]);
+            let filename = &args[1];
+            let source = read_source_file(filename);
             println!("Using bytecode compiler + VM...");
-            run(&source, error_mode);
+            run(&source, filename, error_mode);
         }
     }
 }
@@ -122,8 +127,12 @@ fn compile_to_bytecode(source: &str, output_file: &str, error_mode: ErrorMode) {
         process::exit(1);
     }
 
+    // 获取导入符号映射
+    let imported_symbols = type_checker.get_imported_symbols();
+
     // 编译为字节码
     let mut compiler = Compiler::new();
+    compiler.set_imported_symbols(imported_symbols);
     let chunk = match compiler.compile(program) {
         Ok(chunk) => chunk,
         Err(err) => {
@@ -186,10 +195,49 @@ fn run_bytecode_file(filename: &str) {
     }
 }
 
+/// 解析程序中的模块引用，将 ModuleReference 转换为 ModuleDeclaration
+fn resolve_module_references(program: Program, source_file_path: &str) -> Result<Program, String> {
+    let mut loader = ModuleLoader::new();
 
+    // 添加搜索路径：源文件所在目录和当前工作目录
+    if let Some(parent) = PathBuf::from(source_file_path).parent() {
+        loader.add_search_path(parent);
+    }
+    loader.add_search_path(".");
+
+    let mut resolved_statements = Vec::new();
+
+    for stmt in program.statements {
+        match stmt {
+            Stmt::ModuleReference { name, is_public } => {
+                // 加载模块文件
+                match loader.load_module(&name) {
+                    Ok(module_program) => {
+                        // 将加载的模块转换为内联模块声明
+                        resolved_statements.push(Stmt::ModuleDeclaration {
+                            name,
+                            statements: module_program.statements,
+                            is_public,
+                        });
+                    }
+                    Err(err) => {
+                        return Err(format!("Failed to load module '{}': {:?}", name, err));
+                    }
+                }
+            }
+            _ => {
+                resolved_statements.push(stmt);
+            }
+        }
+    }
+
+    Ok(Program {
+        statements: resolved_statements,
+    })
+}
 
 /// 新的字节码编译器 + VM执行
-fn run(source: &str, error_mode: ErrorMode) {
+fn run(source: &str, source_file: &str, error_mode: ErrorMode) {
     // 词法分析
     let mut lexer = Lexer::new(source.to_string());
     let tokens = match lexer.tokenize() {
@@ -206,10 +254,19 @@ fn run(source: &str, error_mode: ErrorMode) {
 
     // 语法分析
     let mut parser = Parser::new(tokens);
-    let program = match parser.parse() {
+    let mut program = match parser.parse() {
         Ok(prog) => prog,
         Err(err) => {
             eprintln!("Parse error: {:?}", err);
+            process::exit(1);
+        }
+    };
+
+    // 解析模块引用（将 mod name; 转换为实际加载的模块）
+    program = match resolve_module_references(program, source_file) {
+        Ok(prog) => prog,
+        Err(err) => {
+            eprintln!("Module resolution error: {}", err);
             process::exit(1);
         }
     };
@@ -221,8 +278,12 @@ fn run(source: &str, error_mode: ErrorMode) {
         process::exit(1);
     }
 
+    // 获取导入符号映射
+    let imported_symbols = type_checker.get_imported_symbols();
+
     // 编译为字节码
     let mut compiler = Compiler::new();
+    compiler.set_imported_symbols(imported_symbols);
     let chunk = match compiler.compile(program) {
         Ok(chunk) => chunk,
         Err(err) => {
@@ -289,7 +350,7 @@ mod tests {
             let y = 20;
             print(x + y);
         "#;
-        run(source, ErrorMode::Simple);
+        run(source, "test.zero", ErrorMode::Simple);
     }
 
     #[test]
@@ -298,11 +359,11 @@ mod tests {
             fn add(a, b) {
                 return a + b;
             }
-            
+
             let result = add(5, 3);
             print(result);
         "#;
-        run(source, ErrorMode::Simple);
+        run(source, "test.zero", ErrorMode::Simple);
     }
 
     #[test]
@@ -312,10 +373,10 @@ mod tests {
             let y = 200;
             print(x + y);
         "#;
-        
+
         println!("\n=== Bytecode VM ===");
-        run(source, ErrorMode::Simple);
-        
+        run(source, "test.zero", ErrorMode::Simple);
+
         println!("\n=== Old Interpreter ===");
         run_old(source, ErrorMode::Simple);
     }
@@ -327,14 +388,14 @@ mod tests {
             if x > 10 {
                 print(x);
             }
-            
+
             let i = 0;
             while i < 3 {
                 print(i);
                 i = i + 1;
             }
         "#;
-        run(source, ErrorMode::Simple);
+        run(source, "test.zero", ErrorMode::Simple);
     }
 
     #[test]
@@ -343,18 +404,18 @@ mod tests {
             fn multiply(a, b) {
                 return a * b;
             }
-            
+
             fn factorial(n) {
                 if n <= 1 {
                     return 1;
                 }
                 return n * factorial(n - 1);
             }
-            
+
             print(multiply(6, 7));
             print(factorial(5));
         "#;
-        run(source, ErrorMode::Simple);
+        run(source, "test.zero", ErrorMode::Simple);
     }
 
     #[test]
@@ -369,7 +430,7 @@ mod tests {
             print(s);
             print(b);
         "#;
-        run(source, ErrorMode::Simple);
+        run(source, "test.zero", ErrorMode::Simple);
     }
 
     #[test]
@@ -378,11 +439,11 @@ mod tests {
             fn add(a: int, b: int) {
                 return a + b;
             }
-            
+
             let result = add(10, 20);
             print(result);
         "#;
-        run(source, ErrorMode::Simple);
+        run(source, "test.zero", ErrorMode::Simple);
     }
 
     #[test]
@@ -391,12 +452,12 @@ mod tests {
             fn multiply(a, b: int) {
                 return a * b;
             }
-            
+
             let x = 5;
             let result = multiply(x, 10);
             print(result);
         "#;
-        run(source, ErrorMode::Simple);
+        run(source, "test.zero", ErrorMode::Simple);
     }
 
 }

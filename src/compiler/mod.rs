@@ -59,6 +59,7 @@ pub struct Compiler {
     local_types: Vec<LocalTypeInfo>, // 局部变量类型信息
     global_types: HashMap<String, Type>, // 全局变量类型信息
     methods: HashMap<String, HashMap<String, Function>>,  // type_name -> (method_name -> function)
+    imported_symbols: HashMap<String, String>,  // 导入符号映射: 别名 -> 原始名
 }
 
 impl Compiler {
@@ -73,7 +74,13 @@ impl Compiler {
             local_types: Vec::new(),
             global_types: HashMap::new(),
             methods: HashMap::new(),
+            imported_symbols: HashMap::new(),
         }
+    }
+
+    /// 设置导入符号映射（从 TypeChecker 传入）
+    pub fn set_imported_symbols(&mut self, imported_symbols: HashMap<String, String>) {
+        self.imported_symbols = imported_symbols;
     }
 
     /// 编译程序
@@ -96,7 +103,7 @@ impl Compiler {
                 self.emit(OpCode::Pop, 0);
             }
 
-            Stmt::StructDeclaration { name, fields } => {
+            Stmt::StructDeclaration { visibility: _, name, fields } => {
                 // 注册结构体定义（包含完整的字段类型信息）
                 let field_infos: Vec<StructFieldInfo> = fields.iter().map(|f| {
                     StructFieldInfo {
@@ -108,7 +115,7 @@ impl Compiler {
                 // 结构体声明在运行时不需要操作
             }
 
-            Stmt::TypeAlias { name: _, target_type: _ } => {
+            Stmt::TypeAlias { visibility: _, name: _, target_type: _ } => {
                 // 类型别名在编译时处理，运行时不需要操作
             }
 
@@ -138,6 +145,24 @@ impl Compiler {
                 self.methods.insert(type_name.clone(), method_map);
 
                 // Impl块在运行时不需要额外操作
+            }
+
+            Stmt::ModuleDeclaration { name: _, statements, is_public: _ } => {
+                // 编译模块内的所有语句
+                for stmt in statements {
+                    self.compile_statement(stmt)?;
+                }
+                // 模块声明本身在运行时不需要额外操作
+            }
+
+            Stmt::UseStatement { path: _, items: _ } => {
+                // 导入语句在编译时处理，运行时不需要操作
+                // 所有符号解析已经在类型检查阶段完成
+            }
+
+            Stmt::ModuleReference { name: _, is_public: _ } => {
+                // 模块引用在编译前由 ModuleLoader 解析
+                // 编译时不需要生成字节码
             }
 
             Stmt::VarDeclaration { name, mutable, type_annotation, initializer } => {
@@ -174,11 +199,11 @@ impl Compiler {
                 }
             }
 
-            Stmt::FnDeclaration { name, parameters, return_type: _, body } => {
+            Stmt::FnDeclaration { visibility: _, name, parameters, return_type: _, body } => {
                 let function = self.compile_function(name.clone(), &parameters, body)?;
                 let idx = self.chunk.add_constant(Value::Function(function));
                 self.emit(OpCode::LoadConst(idx), 0);
-                
+
                 if self.scope_depth == 0 {
                     let name_idx = self.identifier_constant(&name)?;
                     self.emit(OpCode::StoreGlobal(name_idx), 0);
@@ -457,9 +482,29 @@ impl Compiler {
                 if let Ok(slot) = self.resolve_local(&name) {
                     self.emit(OpCode::LoadLocal(slot), 0);
                 } else {
-                    let idx = self.identifier_constant(&name)?;
+                    // 检查是否是导入的符号，如果是，使用原始名而不是别名
+                    let actual_name = self.imported_symbols.get(&name)
+                        .map(|s| s.clone())
+                        .unwrap_or_else(|| name.clone());
+                    let idx = self.identifier_constant(&actual_name)?;
                     self.emit(OpCode::LoadGlobal(idx), 0);
                 }
+            }
+
+            Expr::Path { segments } => {
+                // 路径表达式: module::item
+                // 将路径转换为全局变量名
+                // 例如: math::add -> 全局变量 "add"（因为在模块内已定义）
+                //
+                // 注意：由于我们当前的编译策略是将所有模块函数编译到全局作用域，
+                // 我们只需要访问最后一个段（实际的符号名）
+                if segments.is_empty() {
+                    return Err(CompileError::UndefinedVariable("empty path".to_string()));
+                }
+
+                let item_name = &segments[segments.len() - 1];
+                let idx = self.identifier_constant(item_name)?;
+                self.emit(OpCode::LoadGlobal(idx), 0);
             }
 
             Expr::Binary { left, operator, right } => {
@@ -763,7 +808,25 @@ impl Compiler {
                     }
                 }
                 // 再查找全局变量类型
-                if let Some(t) = self.global_types.get(name) {
+                // 如果是导入的符号，使用原始名查找
+                let actual_name = self.imported_symbols.get(name)
+                    .map(|s| s.as_str())
+                    .unwrap_or(name.as_str());
+                if let Some(t) = self.global_types.get(actual_name) {
+                    return self.resolve_named_type(t);
+                }
+                Type::Unknown
+            }
+
+            Expr::Path { segments } => {
+                // 路径表达式类型推断
+                // 由于模块符号被编译为全局变量，我们使用最后一个段查找类型
+                if segments.is_empty() {
+                    return Type::Unknown;
+                }
+
+                let item_name = &segments[segments.len() - 1];
+                if let Some(t) = self.global_types.get(item_name) {
                     return self.resolve_named_type(t);
                 }
                 Type::Unknown

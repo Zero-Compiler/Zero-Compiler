@@ -118,13 +118,13 @@ impl Interpreter {
 
     fn execute_statement(&mut self, stmt: &Stmt) -> RuntimeResult<Value> {
         match stmt {
-            Stmt::StructDeclaration { name: _, fields: _ } => {
+            Stmt::StructDeclaration { visibility: _, name: _, fields: _ } => {
                 // 结构体声明在解释器中不需要运行时操作
                 // 结构体信息由类型检查器管理
                 Ok(Value::Null)
             }
 
-            Stmt::TypeAlias { name: _, target_type: _ } => {
+            Stmt::TypeAlias { visibility: _, name: _, target_type: _ } => {
                 // 类型别名在解释器中不需要运行时操作
                 Ok(Value::Null)
             }
@@ -147,6 +147,7 @@ impl Interpreter {
             }
 
             Stmt::FnDeclaration {
+                visibility: _,
                 name,
                 parameters,
                 return_type: _,
@@ -283,6 +284,26 @@ impl Interpreter {
                 // They are only used for the bytecode compiler
                 Ok(Value::Null)
             }
+
+            Stmt::ModuleDeclaration { name: _, statements, is_public: _ } => {
+                // Execute all statements in the module
+                for stmt in statements {
+                    self.execute_statement(stmt)?;
+                }
+                Ok(Value::Null)
+            }
+
+            Stmt::UseStatement { .. } => {
+                // Use statements are handled at compile/type-check time
+                // No runtime action needed in the interpreter
+                Ok(Value::Null)
+            }
+
+            Stmt::ModuleReference { name: _, is_public: _ } => {
+                // Module references are resolved before interpretation
+                // No runtime action needed in the old interpreter
+                Ok(Value::Null)
+            }
         }
     }
 
@@ -316,6 +337,16 @@ impl Interpreter {
             Expr::Boolean(b) => Ok(Value::Boolean(*b)),
             Expr::Char(c) => Ok(Value::Char(*c)),
             Expr::Identifier(name) => self.environment.get(name),
+
+            Expr::Path { segments } => {
+                // 路径表达式在旧解释器中不支持模块系统
+                // 我们简单地使用最后一个段作为变量名
+                if segments.is_empty() {
+                    return Err(RuntimeError::UndefinedVariable("empty path".to_string()));
+                }
+                let item_name = &segments[segments.len() - 1];
+                self.environment.get(item_name)
+            }
 
             Expr::Binary {
                 left,

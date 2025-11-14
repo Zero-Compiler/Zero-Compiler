@@ -51,6 +51,7 @@ pub enum TokenType {
     Pub,         // pub关键字
     Use,         // use关键字
     Mod,         // mod关键字
+    As,          // as关键字（用于重命名导入）
     Macro,       // macro关键字
     Derive,      // derive关键字
     
@@ -104,7 +105,8 @@ pub enum TokenType {
     Dot,            // .
     DotDot,         // ..
     Arrow,          // ->
-    
+    DoubleColon,    // ::
+
     // 科学计数法（将被预处理器转换）
     ScientificExponent,
     
@@ -136,6 +138,7 @@ impl TokenType {
             "pub" => Some(TokenType::Pub),
             "use" => Some(TokenType::Use),
             "mod" => Some(TokenType::Mod),
+            "as" => Some(TokenType::As),
             "macro" => Some(TokenType::Macro),
             "derive" => Some(TokenType::Derive),
             // 类型关键字

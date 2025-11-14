@@ -1,0 +1,21 @@
+// 最简单的模块语法测试 - 仅测试解析，不执行任何模块代码
+
+// 测试 pub 关键字
+pub fn test1() -> int {
+    return 1;
+}
+
+// 测试模块声明
+mod mymodule {
+    fn inner() -> int {
+        return 2;
+    }
+}
+
+// 测试 use 语句
+use mymodule::inner;
+
+// 主程序 - 不依赖任何模块功能
+fn main() {
+    print(42);
+}

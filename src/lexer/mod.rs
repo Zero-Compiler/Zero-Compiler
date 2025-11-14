@@ -698,7 +698,12 @@ impl Lexer {
                     }
                     ':' => {
                         self.advance();
-                        Token::new(TokenType::Colon, ":".to_string(), start_pos, self.current_position())
+                        if self.current_char == Some(':') {
+                            self.advance();
+                            Token::new(TokenType::DoubleColon, "::".to_string(), start_pos, self.current_position())
+                        } else {
+                            Token::new(TokenType::Colon, ":".to_string(), start_pos, self.current_position())
+                        }
                     }
                     '.' => {
                         self.advance();

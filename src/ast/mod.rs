@@ -82,7 +82,12 @@ pub enum Expr {
     Boolean(bool),
     Char(char),      // 字符字面量
     Identifier(String),
-    
+
+    // 路径表达式 (module::item 或 module::submodule::item)
+    Path {
+        segments: Vec<String>,  // ["math", "geometry", "area"]
+    },
+
     // 数组字面量
     Array {
         elements: Vec<Expr>,
@@ -196,6 +201,7 @@ pub enum Stmt {
     
     // 函数声明
     FnDeclaration {
+        visibility: Visibility,  // 新增：可见性
         name: String,
         parameters: Vec<Parameter>,
         return_type: Option<Type>,
@@ -204,12 +210,14 @@ pub enum Stmt {
     
     // 结构体声明
     StructDeclaration {
+        visibility: Visibility,  // 新增：可见性
         name: String,
         fields: Vec<StructField>,
     },
     
     // 类型别名声明
     TypeAlias {
+        visibility: Visibility,  // 新增：可见性
         name: String,
         target_type: Type,
     },
@@ -261,6 +269,41 @@ pub enum Stmt {
         type_name: String,
         methods: Vec<MethodDeclaration>,
     },
+
+    // 模块声明
+    ModuleDeclaration {
+        name: String,
+        statements: Vec<Stmt>,
+        is_public: bool,
+    },
+
+    // 导入语句
+    UseStatement {
+        path: Vec<String>,  // 模块路径，如 ["math", "geometry"]
+        items: UseItems,
+    },
+
+    // 模块引用（从文件加载）
+    ModuleReference {
+        name: String,       // 模块名（对应文件名）
+        is_public: bool,    // 是否公开
+    },
+}
+
+/// 导入项类型
+#[derive(Debug, Clone, PartialEq)]
+pub enum UseItems {
+    All,                              // use math::*
+    Single(String),                   // use math::add
+    Multiple(Vec<String>),            // use math::{add, sub}
+    Renamed(String, String),          // use math::add as plus
+}
+
+/// 可见性修饰符
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Visibility {
+    Public,    // pub
+    Private,   // 默认（无修饰符）
 }
 
 /// 方法声明（与函数类似，但有隐式的 self 参数）

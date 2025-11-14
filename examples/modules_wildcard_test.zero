@@ -1,0 +1,32 @@
+// 通配符导入测试
+
+mod utils {
+    pub fn double(x: int) -> int {
+        return x * 2;
+    }
+
+    pub fn triple(x: int) -> int {
+        return x * 3;
+    }
+
+    pub fn square(x: int) -> int {
+        return x * x;
+    }
+
+    fn private_fn() -> int {
+        return 99;
+    }
+}
+
+// 通配符导入所有公共符号
+use utils::*;
+
+// 使用导入的函数
+let a: int = double(5);
+print(a);  // 10
+
+let b: int = triple(4);
+print(b);  // 12
+
+let c: int = square(6);
+print(c);  // 36

@@ -1,4 +1,4 @@
-use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp, Type, Parameter, MethodDeclaration};
+use crate::ast::{BinaryOp, Expr, Program, Stmt, UnaryOp, Type, Parameter, MethodDeclaration, UseItems, Visibility};
 use crate::lexer::token::{Token, TokenType, Position};
 
 pub struct Parser {
@@ -85,17 +85,35 @@ impl Parser {
     }
 
     fn declaration(&mut self) -> ParseResult<Stmt> {
+        // 检查可见性修饰符
+        let visibility = if self.match_token(&[TokenType::Pub]) {
+            Visibility::Public
+        } else {
+            Visibility::Private
+        };
+
         if self.match_token(&[TokenType::Let, TokenType::Var]) {
             self.var_declaration()
         } else if self.match_token(&[TokenType::Fn]) {
-            self.fn_declaration()
+            self.fn_declaration(visibility)
         } else if self.match_token(&[TokenType::Struct]) {
-            self.struct_declaration()
+            self.struct_declaration(visibility)
         } else if self.match_token(&[TokenType::Type]) {
-            self.type_alias_declaration()
+            self.type_alias_declaration(visibility)
         } else if self.match_token(&[TokenType::Impl]) {
             self.impl_block()
+        } else if self.match_token(&[TokenType::Mod]) {
+            self.mod_declaration(visibility)
+        } else if self.match_token(&[TokenType::Use]) {
+            self.use_statement()
         } else {
+            // 如果有 pub 但没有后续声明，报错
+            if visibility == Visibility::Public {
+                return Err(ParseError::UnexpectedToken {
+                    expected: "fn, struct, type, or mod after 'pub'".to_string(),
+                    found: self.current_token().token_type.clone(),
+                });
+            }
             self.statement()
         }
     }
@@ -131,7 +149,7 @@ impl Parser {
         })
     }
 
-    fn fn_declaration(&mut self) -> ParseResult<Stmt> {
+    fn fn_declaration(&mut self, visibility: Visibility) -> ParseResult<Stmt> {
         let name_token = self.consume(TokenType::Identifier, "Expected function name")?;
         let name = name_token.value.clone();
 
@@ -141,14 +159,14 @@ impl Parser {
         if !self.check(TokenType::RightParen) {
             loop {
                 let param_name = self.consume(TokenType::Identifier, "Expected parameter name")?;
-                
+
                 // 解析可选的类型注解
                 let type_annotation = if self.match_token(&[TokenType::Colon]) {
                     Some(self.parse_type()?)
                 } else {
                     None
                 };
-                
+
                 parameters.push(Parameter {
                     name: param_name.value.clone(),
                     type_annotation,
@@ -161,14 +179,14 @@ impl Parser {
         }
 
         self.consume(TokenType::RightParen, "Expected ')' after parameters")?;
-        
+
         // 解析可选的返回类型
         let return_type = if self.match_token(&[TokenType::Arrow]) {
             Some(self.parse_type()?)
         } else {
             None
         };
-        
+
         self.consume(TokenType::LeftBrace, "Expected '{' before function body")?;
 
         let mut body = Vec::new();
@@ -179,6 +197,7 @@ impl Parser {
         self.consume(TokenType::RightBrace, "Expected '}' after function body")?;
 
         Ok(Stmt::FnDeclaration {
+            visibility,
             name,
             parameters,
             return_type,
@@ -186,27 +205,27 @@ impl Parser {
         })
     }
     
-    fn struct_declaration(&mut self) -> ParseResult<Stmt> {
+    fn struct_declaration(&mut self, visibility: Visibility) -> ParseResult<Stmt> {
         let name_token = self.consume(TokenType::Identifier, "Expected struct name")?;
         let name = name_token.value.clone();
-        
+
         self.consume(TokenType::LeftBrace, "Expected '{' after struct name")?;
-        
+
         let mut fields = Vec::new();
-        
+
         while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
             let field_name_token = self.consume(TokenType::Identifier, "Expected field name")?;
             let field_name = field_name_token.value.clone();
-            
+
             self.consume(TokenType::Colon, "Expected ':' after field name")?;
-            
+
             let field_type = self.parse_type()?;
-            
+
             fields.push(crate::ast::StructField {
                 name: field_name,
                 field_type,
             });
-            
+
             // 允许可选的逗号
             if self.match_token(&[TokenType::Comma]) {
                 // 继续
@@ -214,38 +233,38 @@ impl Parser {
                 break;
             }
         }
-        
+
         self.consume(TokenType::RightBrace, "Expected '}' after struct fields")?;
         self.consume(TokenType::Semicolon, "Expected ';' after struct declaration")?;
-        
-        Ok(Stmt::StructDeclaration { name, fields })
+
+        Ok(Stmt::StructDeclaration { visibility, name, fields })
     }
     
-    fn type_alias_declaration(&mut self) -> ParseResult<Stmt> {
+    fn type_alias_declaration(&mut self, visibility: Visibility) -> ParseResult<Stmt> {
         let name_token = self.consume(TokenType::Identifier, "Expected type alias name")?;
         let name = name_token.value.clone();
-        
+
         self.consume(TokenType::Equal, "Expected '=' after type alias name")?;
-        
+
         // 检查是否是匿名结构体
         let target_type = if self.match_token(&[TokenType::Struct]) {
             self.consume(TokenType::LeftBrace, "Expected '{' after 'struct'")?;
-            
+
             let mut fields = Vec::new();
-            
+
             while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
                 let field_name_token = self.consume(TokenType::Identifier, "Expected field name")?;
                 let field_name = field_name_token.value.clone();
-                
+
                 self.consume(TokenType::Colon, "Expected ':' after field name")?;
-                
+
                 let field_type = self.parse_type()?;
-                
+
                 fields.push(crate::ast::StructField {
                     name: field_name,
                     field_type,
                 });
-                
+
                 // 允许可选的逗号
                 if self.match_token(&[TokenType::Comma]) {
                     // 继续
@@ -253,9 +272,9 @@ impl Parser {
                     break;
                 }
             }
-            
+
             self.consume(TokenType::RightBrace, "Expected '}' after struct fields")?;
-            
+
             Type::Struct(crate::ast::StructType {
                 name: format!("anonymous_{}", name),
                 fields,
@@ -264,10 +283,10 @@ impl Parser {
             // 普通类型别名 - 可以是基本类型或用户定义类型
             self.parse_type()?
         };
-        
+
         self.consume(TokenType::Semicolon, "Expected ';' after type alias")?;
 
-        Ok(Stmt::TypeAlias { name, target_type })
+        Ok(Stmt::TypeAlias { visibility, name, target_type })
     }
 
     fn impl_block(&mut self) -> ParseResult<Stmt> {
@@ -354,6 +373,103 @@ impl Parser {
         self.consume(TokenType::RightBrace, "Expected '}' after impl block")?;
 
         Ok(Stmt::ImplBlock { type_name, methods })
+    }
+
+    // 解析模块声明: mod name { ... }
+    fn mod_declaration(&mut self, visibility: Visibility) -> ParseResult<Stmt> {
+        let name_token = self.consume(TokenType::Identifier, "Expected module name after 'mod'")?;
+        let name = name_token.value.clone();
+
+        // 检查是否是模块引用（从文件加载）: mod name;
+        if self.match_token(&[TokenType::Semicolon]) {
+            return Ok(Stmt::ModuleReference {
+                name,
+                is_public: visibility == Visibility::Public,
+            });
+        }
+
+        // 否则是内联模块声明: mod name { ... }
+        self.consume(TokenType::LeftBrace, "Expected '{' or ';' after module name")?;
+
+        let mut statements = Vec::new();
+        while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
+            statements.push(self.declaration()?);
+        }
+
+        self.consume(TokenType::RightBrace, "Expected '}' after module body")?;
+
+        Ok(Stmt::ModuleDeclaration {
+            name,
+            statements,
+            is_public: visibility == Visibility::Public,
+        })
+    }
+
+    // 解析导入语句: use path::item;
+    fn use_statement(&mut self) -> ParseResult<Stmt> {
+        // 解析模块路径
+        let mut path = vec![
+            self.consume(TokenType::Identifier, "Expected module name after 'use'")?.value
+        ];
+
+        // 解析路径 (module::submodule::item)
+        while self.match_token(&[TokenType::DoubleColon]) {
+            // 检查通配符 *
+            if self.match_token(&[TokenType::Star]) {
+                self.consume(TokenType::Semicolon, "Expected ';' after use statement")?;
+                return Ok(Stmt::UseStatement {
+                    path,
+                    items: UseItems::All,
+                });
+            }
+
+            // 检查多项导入 {item1, item2, ...}
+            if self.check(TokenType::LeftBrace) {
+                self.advance();
+                let mut items = Vec::new();
+
+                loop {
+                    let item = self.consume(TokenType::Identifier, "Expected identifier in use list")?.value;
+                    items.push(item);
+
+                    if !self.match_token(&[TokenType::Comma]) {
+                        break;
+                    }
+                }
+
+                self.consume(TokenType::RightBrace, "Expected '}' after use list")?;
+                self.consume(TokenType::Semicolon, "Expected ';' after use statement")?;
+
+                return Ok(Stmt::UseStatement {
+                    path,
+                    items: UseItems::Multiple(items),
+                });
+            }
+
+            // 继续解析路径
+            path.push(self.consume(TokenType::Identifier, "Expected identifier after '::'")?.value);
+        }
+
+        // 检查重命名 (as keyword)
+        if self.match_token(&[TokenType::As]) {
+            let alias = self.consume(TokenType::Identifier, "Expected alias after 'as'")?.value;
+            let item = path.pop().unwrap();
+            self.consume(TokenType::Semicolon, "Expected ';' after use statement")?;
+
+            return Ok(Stmt::UseStatement {
+                path,
+                items: UseItems::Renamed(item, alias),
+            });
+        }
+
+        // 单个项导入
+        let item = path.pop().unwrap();
+        self.consume(TokenType::Semicolon, "Expected ';' after use statement")?;
+
+        Ok(Stmt::UseStatement {
+            path,
+            items: UseItems::Single(item),
+        })
     }
 
     fn parse_type(&mut self) -> ParseResult<Type> {
@@ -879,35 +995,48 @@ impl Parser {
         if self.match_token(&[TokenType::Identifier]) {
             let name = self.tokens.get(self.current.saturating_sub(1))
                 .unwrap().value.clone();
-            
+
+            // 检查是否是路径表达式 module::item
+            if self.check(TokenType::DoubleColon) {
+                let mut segments = vec![name];
+
+                // 解析路径段 (module::submodule::item)
+                while self.match_token(&[TokenType::DoubleColon]) {
+                    let segment_token = self.consume(TokenType::Identifier, "Expected identifier after '::'")?;
+                    segments.push(segment_token.value.clone());
+                }
+
+                return Ok(Expr::Path { segments });
+            }
+
             // 检查是否是结构体字面量 StructName { field: value, ... }
             if self.check(TokenType::LeftBrace) {
                 self.advance(); // 消费 '{'
-                
+
                 let mut fields = Vec::new();
-                
+
                 while !self.check(TokenType::RightBrace) && !self.check(TokenType::EOF) {
                     let field_name_token = self.consume(TokenType::Identifier, "Expected field name")?;
                     let field_name = field_name_token.value.clone();
-                    
+
                     self.consume(TokenType::Colon, "Expected ':' after field name")?;
-                    
+
                     let field_value = self.expression()?;
-                    
+
                     fields.push((field_name, field_value));
-                    
+
                     if self.match_token(&[TokenType::Comma]) {
                         // 继续
                     } else {
                         break;
                     }
                 }
-                
+
                 self.consume(TokenType::RightBrace, "Expected '}' after struct fields")?;
-                
+
                 return Ok(Expr::struct_literal(name, fields));
             }
-            
+
             return Ok(Expr::identifier(name));
         }
 

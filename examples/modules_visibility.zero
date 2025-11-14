@@ -1,0 +1,32 @@
+// 可见性测试
+// 测试：pub vs private、模块内访问、结构体和类型别名的可见性
+
+pub struct Point {
+    x: int,
+    y: int
+};
+
+pub type Distance = float;
+
+mod geometry {
+    pub struct Circle {
+        radius: int
+    };
+
+    pub fn area(c: Circle) -> int {
+        return c.radius * c.radius * 3;
+    }
+
+    fn internal_calc() -> int {
+        return 100;
+    }
+}
+
+use geometry::Circle;
+use geometry::area;
+
+fn main() {
+    let c: Circle = Circle { radius: 5 };
+    let a: int = area(c);
+    print(a);
+}

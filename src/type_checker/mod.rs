@@ -47,17 +47,31 @@ type TypeResult<T> = Result<T, TypeError>;
 struct Symbol {
     symbol_type: Type,
     is_mutable: bool,
+    visibility: crate::ast::Visibility,  // 新增：可见性
+    module_path: Vec<String>,  // 新增：符号所在的模块路径
 }
 
-/// 符号表（支持作用域）
+/// 模块符号表（存储模块导出的符号）
+#[derive(Debug, Clone)]
+struct ModuleSymbols {
+    symbols: HashMap<String, Symbol>,
+}
+
+/// 符号表（支持作用域和模块）
 pub struct SymbolTable {
     scopes: Vec<HashMap<String, Symbol>>,
+    modules: HashMap<Vec<String>, ModuleSymbols>,  // 模块路径 -> 模块符号
+    current_module_path: Vec<String>,  // 当前所在的模块路径
+    imported_symbols: HashMap<String, (Vec<String>, String)>,  // 导入的符号名(别名) -> (模块路径, 原始名)
 }
 
 impl SymbolTable {
     pub fn new() -> Self {
         SymbolTable {
             scopes: vec![HashMap::new()],
+            modules: HashMap::new(),
+            current_module_path: Vec::new(),
+            imported_symbols: HashMap::new(),
         }
     }
 
@@ -69,19 +83,122 @@ impl SymbolTable {
         self.scopes.pop();
     }
 
+    /// 定义符号（兼容旧接口）
     pub fn define(&mut self, name: String, symbol_type: Type, is_mutable: bool) {
+        self.define_with_visibility(name, symbol_type, is_mutable, crate::ast::Visibility::Private);
+    }
+
+    /// 定义符号（带可见性）
+    pub fn define_with_visibility(&mut self, name: String, symbol_type: Type, is_mutable: bool, visibility: crate::ast::Visibility) {
+        let symbol = Symbol {
+            symbol_type,
+            is_mutable,
+            visibility: visibility.clone(),
+            module_path: self.current_module_path.clone(),
+        };
+
         if let Some(scope) = self.scopes.last_mut() {
-            scope.insert(name, Symbol { symbol_type, is_mutable });
+            scope.insert(name.clone(), symbol.clone());
+        }
+
+        // 如果是公共符号且在模块内，注册到模块符号表
+        if visibility == crate::ast::Visibility::Public && !self.current_module_path.is_empty() {
+            self.register_module_symbol(name, symbol);
         }
     }
 
+    /// 注册模块符号
+    fn register_module_symbol(&mut self, name: String, symbol: Symbol) {
+        let module_path = self.current_module_path.clone();
+        self.modules.entry(module_path)
+            .or_insert_with(|| ModuleSymbols { symbols: HashMap::new() })
+            .symbols.insert(name, symbol);
+    }
+
+    /// 获取符号（先查找导入的符号，再查找本地符号）
     pub fn get(&self, name: &str) -> Option<&Symbol> {
+        // 1. 检查是否是导入的符号
+        // imported_symbols 现在存储: 别名 -> (模块路径, 原始名)
+        if let Some((module_path, original_name)) = self.imported_symbols.get(name) {
+            if let Some(module_symbols) = self.modules.get(module_path) {
+                if let Some(symbol) = module_symbols.symbols.get(original_name) {
+                    return Some(symbol);
+                }
+            }
+        }
+
+        // 2. 检查当前作用域链
         for scope in self.scopes.iter().rev() {
             if let Some(symbol) = scope.get(name) {
                 return Some(symbol);
             }
         }
+
         None
+    }
+
+    /// 进入模块
+    pub fn enter_module(&mut self, module_name: String) {
+        self.current_module_path.push(module_name);
+    }
+
+    /// 退出模块
+    pub fn exit_module(&mut self) {
+        self.current_module_path.pop();
+    }
+
+    /// 导入单个符号
+    pub fn import_symbol(&mut self, module_path: Vec<String>, symbol_name: String) {
+        if let Some(module_symbols) = self.modules.get(&module_path) {
+            if let Some(symbol) = module_symbols.symbols.get(&symbol_name) {
+                // 检查可见性
+                if symbol.visibility == crate::ast::Visibility::Public {
+                    // 存储: 别名(=原始名) -> (模块路径, 原始名)
+                    self.imported_symbols.insert(symbol_name.clone(), (module_path.clone(), symbol_name.clone()));
+                    // 也添加到当前作用域
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(symbol_name, symbol.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// 导入模块的所有公共符号（通配符导入）
+    pub fn import_all(&mut self, module_path: Vec<String>) {
+        if let Some(module_symbols) = self.modules.get(&module_path) {
+            for (name, symbol) in &module_symbols.symbols {
+                if symbol.visibility == crate::ast::Visibility::Public {
+                    // 存储: 别名(=原始名) -> (模块路径, 原始名)
+                    self.imported_symbols.insert(name.clone(), (module_path.clone(), name.clone()));
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(name.clone(), symbol.clone());
+                    }
+                }
+            }
+        }
+    }
+
+    /// 导入多个符号
+    pub fn import_multiple(&mut self, module_path: Vec<String>, symbol_names: Vec<String>) {
+        for symbol_name in symbol_names {
+            self.import_symbol(module_path.clone(), symbol_name);
+        }
+    }
+
+    /// 导入并重命名符号
+    pub fn import_renamed(&mut self, module_path: Vec<String>, original_name: String, alias: String) {
+        if let Some(module_symbols) = self.modules.get(&module_path) {
+            if let Some(symbol) = module_symbols.symbols.get(&original_name) {
+                if symbol.visibility == crate::ast::Visibility::Public {
+                    // 存储: 别名 -> (模块路径, 原始名)
+                    self.imported_symbols.insert(alias.clone(), (module_path.clone(), original_name));
+                    if let Some(scope) = self.scopes.last_mut() {
+                        scope.insert(alias, symbol.clone());
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -108,6 +225,17 @@ impl TypeChecker {
             loop_depth: 0,
             methods: HashMap::new(),
         }
+    }
+
+    /// 获取导入符号映射（别名 -> 原始名）
+    /// 返回格式: HashMap<别名, 原始名>
+    pub fn get_imported_symbols(&self) -> HashMap<String, String> {
+        let mut result = HashMap::new();
+        // imported_symbols 存储的是: 别名 -> (模块路径, 原始名)
+        for (alias, (_module_path, original_name)) in &self.symbol_table.imported_symbols {
+            result.insert(alias.clone(), original_name.clone());
+        }
+        result
     }
 
     /// 解析类型（将Named类型解析为实际类型）
@@ -164,19 +292,19 @@ impl TypeChecker {
     /// 检查语句
     fn check_statement(&mut self, stmt: &Stmt) -> TypeResult<()> {
         match stmt {
-            Stmt::StructDeclaration { name, fields } => {
+            Stmt::StructDeclaration { visibility, name, fields } => {
                 // 注册结构体类型
                 let struct_type = Type::Struct(crate::ast::StructType {
                     name: name.clone(),
                     fields: fields.clone(),
                 });
-                self.symbol_table.define(name.clone(), struct_type, false);
+                self.symbol_table.define_with_visibility(name.clone(), struct_type, false, visibility.clone());
                 Ok(())
             }
 
-            Stmt::TypeAlias { name, target_type } => {
+            Stmt::TypeAlias { visibility, name, target_type } => {
                 // 注册类型别名
-                self.symbol_table.define(name.clone(), target_type.clone(), false);
+                self.symbol_table.define_with_visibility(name.clone(), target_type.clone(), false, visibility.clone());
                 Ok(())
             }
 
@@ -279,6 +407,7 @@ impl TypeChecker {
             }
 
             Stmt::FnDeclaration {
+                visibility,
                 name,
                 parameters,
                 return_type,
@@ -297,8 +426,8 @@ impl TypeChecker {
                     return_type: Box::new(ret_type.clone()),
                 });
 
-                // 注册函数
-                self.symbol_table.define(name.clone(), function_type, false);
+                // 注册函数（带可见性）
+                self.symbol_table.define_with_visibility(name.clone(), function_type, false, visibility.clone());
 
                 // 检查函数体
                 self.symbol_table.push_scope();
@@ -462,6 +591,53 @@ impl TypeChecker {
                 self.symbol_table.pop_scope();
                 Ok(())
             }
+
+            Stmt::ModuleDeclaration { name, statements, is_public: _ } => {
+                // 进入模块命名空间
+                self.symbol_table.enter_module(name.clone());
+                self.symbol_table.push_scope();
+
+                // 检查模块内的语句
+                for stmt in statements {
+                    self.check_statement(stmt)?;
+                }
+
+                self.symbol_table.pop_scope();
+                self.symbol_table.exit_module();
+                Ok(())
+            }
+
+            Stmt::UseStatement { path, items } => {
+                use crate::ast::UseItems;
+
+                match items {
+                    UseItems::Single(name) => {
+                        // 单项导入: use module::item
+                        self.symbol_table.import_symbol(path.clone(), name.clone());
+                    }
+                    UseItems::All => {
+                        // 通配符导入: use module::*
+                        self.symbol_table.import_all(path.clone());
+                    }
+                    UseItems::Multiple(names) => {
+                        // 多项导入: use module::{item1, item2}
+                        self.symbol_table.import_multiple(path.clone(), names.clone());
+                    }
+                    UseItems::Renamed(original, alias) => {
+                        // 重命名导入: use module::item as alias
+                        self.symbol_table.import_renamed(path.clone(), original.clone(), alias.clone());
+                    }
+                }
+                Ok(())
+            }
+
+            Stmt::ModuleReference { name: _, is_public: _ } => {
+                // 模块引用（从文件加载）
+                // 这个语句在类型检查时不需要做任何事情
+                // 实际的模块加载和内容处理会在编译流程中由 ModuleLoader 完成
+                // 此时模块内容已经被解析并替换为 ModuleDeclaration
+                Ok(())
+            }
         }
     }
 
@@ -574,6 +750,41 @@ impl TypeChecker {
                     Ok(symbol.symbol_type.clone())
                 } else {
                     Err(TypeError::UndefinedVariable(name.clone()))
+                }
+            }
+
+            Expr::Path { segments } => {
+                // 路径表达式: module::item 或 module::submodule::item
+                // segments = ["math", "geometry", "area"]
+
+                if segments.is_empty() {
+                    return Err(TypeError::UndefinedVariable("empty path".to_string()));
+                }
+
+                // 最后一个段是实际的符号名，前面的是模块路径
+                let item_name = &segments[segments.len() - 1];
+                let module_path: Vec<String> = segments[..segments.len() - 1].to_vec();
+
+                // 查找模块中的符号
+                if let Some(module_symbols) = self.symbol_table.modules.get(&module_path) {
+                    if let Some(symbol) = module_symbols.symbols.get(item_name) {
+                        // 检查可见性
+                        if symbol.visibility == crate::ast::Visibility::Public {
+                            Ok(symbol.symbol_type.clone())
+                        } else {
+                            Err(TypeError::UndefinedVariable(
+                                format!("{}::{} is private", module_path.join("::"), item_name)
+                            ))
+                        }
+                    } else {
+                        Err(TypeError::UndefinedVariable(
+                            format!("{}::{} not found", module_path.join("::"), item_name)
+                        ))
+                    }
+                } else {
+                    Err(TypeError::UndefinedVariable(
+                        format!("module {} not found", module_path.join("::"))
+                    ))
                 }
             }
 
